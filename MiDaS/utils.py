@@ -192,8 +192,8 @@ def write_depth(path, depth, grayscale, bits=1):
         out = cv2.applyColorMap(np.uint8(out), cv2.COLORMAP_INFERNO)
 
     if bits == 1:
-        cv2.imwrite(path + ".png", out.astype("uint8"))
+        cv2.imwrite(path + ".jpg", out.astype("uint8"), [cv2.IMWRITE_JPEG_QUALITY, 80])
     elif bits == 2:
-        cv2.imwrite(path + ".png", out.astype("uint16"))
+        cv2.imwrite(path + ".jpg", out.astype("uint16"), [cv2.IMWRITE_JPEG_QUALITY, 80])
 
     return

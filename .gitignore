@@ -175,5 +175,4 @@ cython_debug/
 
 /temp
 /models
-in.mp4
-out.mp4
+*.mp4

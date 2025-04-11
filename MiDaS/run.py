@@ -127,39 +127,21 @@ def run(input_path, output_path, model_path, model_type="dpt_beit_large_512", op
     if input_path is not None:
         image_names = glob.glob(os.path.join(input_path, "*"))
         num_images = len(image_names)
-    else:
-        print("No input path specified. Grabbing images from camera.")
-
-    # create output folder
-    if output_path is not None:
-        os.makedirs(output_path, exist_ok=True)
 
     print("Start processing")
+    for index, image_name in enumerate(image_names):
 
-    if input_path is not None:
-        if output_path is None:
-            print("Warning: No output path specified. Images will be processed but not shown or stored anywhere.")
-        for index, image_name in enumerate(image_names):
+        print("  Processing {} ({}/{})".format(image_name, index + 1, num_images))
 
-            print("  Processing {} ({}/{})".format(image_name, index + 1, num_images))
+        # input
+        original_image_rgb = utils.read_image(image_name)  # in [0, 1]
+        image = transform({"image": original_image_rgb})["image"]
 
-            # input
-            original_image_rgb = utils.read_image(image_name)  # in [0, 1]
-            image = transform({"image": original_image_rgb})["image"]
-
-            # compute
-            with torch.no_grad():
-                prediction = process(device, model, model_type, image, (net_w, net_h), original_image_rgb.shape[1::-1],
-                                     optimize, False)
-
-            # output
-            if output_path is not None:
-                filename = os.path.join(output_path, os.path.splitext(os.path.basename(image_name))[0])
-                if not side:
-                    utils.write_depth(filename, prediction, grayscale, bits=2)
-                else:
-                    original_image_bgr = np.flip(original_image_rgb, 2)
-                    content = create_side_by_side(original_image_bgr*255, prediction, grayscale)
-                    cv2.imwrite(filename + ".jpg", content, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        # compute
+        with torch.no_grad():
+            prediction = process(device, model, model_type, image, (net_w, net_h), original_image_rgb.shape[1::-1],
+                                    optimize, False)
+        filename = os.path.join(output_path, os.path.splitext(os.path.basename(image_name))[0])
+        utils.write_depth(filename, prediction, True, bits=2)
 
     print("Finished")
