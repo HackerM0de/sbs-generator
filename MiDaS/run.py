@@ -3,7 +3,7 @@
 import os
 import glob
 import torch
-import utils
+from . import utils
 import cv2
 import argparse
 import time
@@ -11,7 +11,7 @@ import time
 import numpy as np
 
 from imutils.video import VideoStream
-from midas.model_loader import default_models, load_model
+from .midas.model_loader import default_models, load_model
 
 first_execution = True
 def process(device, model, model_type, image, input_size, target_size, optimize, use_camera):
@@ -35,7 +35,6 @@ def process(device, model, model_type, image, input_size, target_size, optimize,
 
     if "openvino" in model_type:
         if first_execution or not use_camera:
-            print(f"    Input resized to {input_size[0]}x{input_size[1]} before entering the encoder")
             first_execution = False
 
         sample = [np.reshape(image, (1, 3, *input_size))]
@@ -55,7 +54,6 @@ def process(device, model, model_type, image, input_size, target_size, optimize,
 
         if first_execution or not use_camera:
             height, width = sample.shape[2:]
-            print(f"    Input resized to {width}x{height} before entering the encoder")
             first_execution = False
 
         prediction = model.forward(sample)

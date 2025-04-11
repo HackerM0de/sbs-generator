@@ -17,7 +17,9 @@ RIGHT_MASKED_DIRECTORY = MASKED_DIRECTORY + "right/"
 INPUT = "in.mp4"
 OUTPUT = "out.mp4"
 
-MODEL_TYPE = "dpt_swin2_large_384"
+CACHED_FRAMES = False
+
+MODEL_TYPE = "dpt_swin2_tiny_256"
 MODEL_PATH = f"models/{MODEL_TYPE}.pt"
 
 SCALE_FACTOR = 50
@@ -31,13 +33,14 @@ def clearDirectory(path):
         pass
     os.makedirs(path, exist_ok=True)
 
-#clearDirectory(FRAME_DIRECTORY)
-#outputFramePath = FRAME_DIRECTORY + "frame%d.jpg"
-#outputDir = os.makedirs(FRAME_DIRECTORY, exist_ok=True)
-#os.system(f"ffmpeg -i {INPUT} -q:v 4 {outputFramePath}")
+if not CACHED_FRAMES:
+    clearDirectory(FRAME_DIRECTORY)
+    outputFramePath = FRAME_DIRECTORY + "frame%d.jpg"
+    outputDir = os.makedirs(FRAME_DIRECTORY, exist_ok=True)
+    os.system(f"ffmpeg -i {INPUT} -q:v 4 {outputFramePath}")
 
-#clearDirectory(DEPTH_DIRECTORY)
-#run.run(FRAME_DIRECTORY, DEPTH_DIRECTORY, MODEL_PATH, MODEL_TYPE)
+    clearDirectory(DEPTH_DIRECTORY)
+    run.run(FRAME_DIRECTORY, DEPTH_DIRECTORY, MODEL_PATH, MODEL_TYPE)
 
 clearDirectory(STEREO_DIRECTORY)
 clearDirectory(LEFT_EYE_DIRECTORY)
