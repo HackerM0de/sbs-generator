@@ -3,25 +3,27 @@ import numpy as np
 import torch
 import torchvision.transforms as T
 from MiDaS.midas.model_loader import load_model
-import multiprocessing
 from multiprocessing import Process, Queue
 from tqdm import tqdm
 import time
 from numba import njit
+import subprocess
+import os
+import signal
 
 cv2.ocl.setUseOpenCL(False)
 
 # Constants
-SCALE_FACTOR = 50
-INPUT_VIDEO_PATH = "in.mp4"
+SCALE_FACTOR = 70
+INPUT_VIDEO_PATH = "climb.mp4"
 OUTPUT_VIDEO_PATH = "out.mp4"
 MODEL_TYPE = "dpt_swin2_tiny_256"
 MODEL_PATH = "models/" + MODEL_TYPE + ".pt"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 50
+PREVIEW_FRAMES = 200  # Set to an integer like 100 to process only the first 100 frames
 
 # Load model in main process
-model_type = "DPT_Large"
 model, transform, _, _ = load_model(DEVICE, MODEL_PATH, MODEL_TYPE, optimize=True, height=None, square=False)
 
 def get_depth_from_image(image):
@@ -45,7 +47,7 @@ def shiftPixels(image, depthMap, direction, scale_factor):
     shifted = np.zeros_like(image)
     for y in range(height):
         for x in range(width):
-            depth_val = depthMap[y, x] / 255.0 - 0.4
+            depth_val = depthMap[y, x] / 255.0
             shift = int(depth_val * scale_factor * direction)
             new_x = x + shift
             if 0 <= new_x < width:
@@ -119,13 +121,38 @@ def process_video():
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS)
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(OUTPUT_VIDEO_PATH, fourcc, fps, (width * 2, height))
+    if PREVIEW_FRAMES is not None:
+        total_frames = min(total_frames, PREVIEW_FRAMES)
+
+    ffmpeg = subprocess.Popen([
+    'ffmpeg',
+    '-hide_banner',
+    '-loglevel', 'warning',
+    '-y',
+    '-f', 'rawvideo',
+    '-thread_queue_size', '512',  # <- Add this line
+    '-pix_fmt', 'bgr24',
+    '-s', f'{width * 2}x{height}',
+    '-r', str(fps),
+    '-i', '-',
+    '-thread_queue_size', '512',  # <- Also for audio input
+    '-i', INPUT_VIDEO_PATH,
+    '-map', '0:v:0',
+    '-map', '1:a:0',
+    '-c:v', 'libx264',
+    '-preset', 'fast',
+    '-crf', '18',
+    '-c:a', 'aac',
+    '-b:a', '192k',
+    '-shortest',
+    '-pix_fmt', 'yuv420p',
+    OUTPUT_VIDEO_PATH
+    ], stdin=subprocess.PIPE)
 
     task_queue = Queue(maxsize=100)
     output_queue = Queue()
 
-    num_workers = max(2, multiprocessing.cpu_count() - 1)
+    num_workers = max(2, 7)
     workers = [Process(target=worker, args=(task_queue, output_queue)) for _ in range(num_workers)]
     for w in workers:
         w.start()
@@ -142,46 +169,55 @@ def process_video():
 
     start_time = time.time()
 
-    while written_frames < total_frames:
-        if frame_idx < total_frames:
-            if not task_queue.full():
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                depth = get_depth_from_image(frame)
-                task_queue.put((frame_idx, frame, depth))
-                frame_idx += 1
-                midas_pbar.update(1)
+    try:
+        while written_frames < total_frames:
+            if frame_idx < total_frames:
+                if not task_queue.full():
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    depth = get_depth_from_image(frame)
+                    task_queue.put((frame_idx, frame, depth))
+                    frame_idx += 1
+                    midas_pbar.update(1)
 
-        while not output_queue.empty():
-            idx, result = output_queue.get()
-            frame_buffer[idx] = result
+            while not output_queue.empty():
+                idx, result = output_queue.get()
+                frame_buffer[idx] = result
 
-        while written_frames in frame_buffer:
-            frame = frame_buffer.pop(written_frames)
-            out.write(frame)
-            written_frames += 1
-            worker_pbar.update(1)
+            while written_frames in frame_buffer:
+                frame = frame_buffer.pop(written_frames)
+                ffmpeg.stdin.write(frame.tobytes())
+                written_frames += 1
+                worker_pbar.update(1)
 
-            elapsed = time.time() - start_time
-            fps_current = written_frames / elapsed if elapsed > 0 else 0
-            remaining = total_frames - written_frames
-            eta = remaining / fps_current if fps_current > 0 else 0
-            time_pbar.set_description(f"ETA: {eta:.1f}s | Total: {elapsed:.1f}s")
-            time_pbar.n = written_frames
-            time_pbar.refresh()
+                elapsed = time.time() - start_time
+                fps_current = written_frames / elapsed if elapsed > 0 else 0
+                remaining = total_frames - written_frames
+                eta = remaining / fps_current if fps_current > 0 else 0
+                time_pbar.set_description(f"ETA: {eta:.1f}s | Total: {elapsed:.1f}s")
+                time_pbar.n = written_frames
+                time_pbar.refresh()
+    finally:
+        cap.release()
 
-    cap.release()
-    out.release()
-    midas_pbar.close()
-    worker_pbar.close()
-    time_pbar.close()
+        try:
+            if ffmpeg.stdin:
+                ffmpeg.stdin.flush()
+                ffmpeg.stdin.close()
+            os.kill(ffmpeg.pid, signal.SIGINT)
+        except Exception as e:
+            print(f"[ERROR] ffmpeg closing failed: {e}")
 
-    for _ in workers:
-        task_queue.put(None)
-    for w in workers:
-        w.join()
+        midas_pbar.close()
+        worker_pbar.close()
+        time_pbar.close()
 
-    print("[Main] Processing complete.")
+        for _ in workers:
+            task_queue.put(None)
+        for w in workers:
+            w.join()
+
+        print("[Main] Processing complete.")
 
 process_video()
